@@ -5,6 +5,10 @@
 #include <Ultrasonic.h>
 #include <LiquidCrystal_I2C.h>
 
+#define RED_LED 5
+#define YEL_LED 18
+#define GRN_LED 19
+
 
 /* GPS */
 static const int RXPin = 16, TXPin = 17;
@@ -20,11 +24,14 @@ double last_latitude = -1;
 
 const char* ssid = "123"; // Ganti dengan nama WiFi Anda
 const char* password = "innovate"; // Ganti dengan kata sandi WiFi Anda
+bool fl_status_online = 0;
 
-void connect_to_wifi() ;
+void wifi_init() ;
 void reconnect_to_wifi();
 void gps_read();
 void gps_displayInfo();
+void lcd_setup();
+void led_init();
 
 
 /* millis */
@@ -32,15 +39,18 @@ void gps_displayInfo();
 unsigned long prev_interval_1 = 0;
 const unsigned long interval_1 = 1000;
 unsigned long prev_interval_2 = 0;
-const unsigned long interval_2 = 2000;
+const unsigned long interval_2 = 1000;
+unsigned long prev_interval_3 = 0;
+const unsigned long interval_3 = 5000;
 
 
 /* Ultrasonic */
 
 Ultrasonic ultrasonic1(15, 2);	// An ultrasonic sensor HC-04
-// Ultrasonic ultrasonic2(12, 13);	// An ultrasonic sensor HC-04
+Ultrasonic ultrasonic2(14, 12);	// An ultrasonic sensor HC-04
 
 int jarak_objek = 0;
+int kapasitas = 0;
 
 /* LCD I2C */
 
@@ -52,19 +62,17 @@ void setup() {
   Serial2.begin(GPSBaud); //GPS init
 
   // Menghubungkan ke jaringan Wi-Fi
-  connect_to_wifi();
+  wifi_init();
 
   //read GPS
   gps_read();
 
   //LCD init
-    // Print a message to the LCD.
-  lcd.init();  
-  lcd.noBacklight();
-  lcd.setCursor(3,0);
-  lcd.print("Hello, world!");
-  lcd.setCursor(2,1);
-  lcd.print("Ywrobot Arduino!");
+  lcd_setup();
+
+  //LED init
+  led_init();
+
 }
 
 void loop() {
@@ -78,9 +86,12 @@ void loop() {
 
     // cek status koneksi wifi
     if (WiFi.status() != WL_CONNECTED) {
+      fl_status_online = 0;
       Serial.println("Koneksi Wi-Fi terputus. Menghubungkan ulang...");
       reconnect_to_wifi(); // Menghubungkan ulang jika koneksi terputus
     }
+    else fl_status_online = 1;
+    
 
     //cek data GPS
     if(last_latitude != latitude ){
@@ -93,23 +104,91 @@ void loop() {
     }
     
     jarak_objek = ultrasonic1.read(); // Prints the distance on the default unit (centimeters)
+    kapasitas = ultrasonic2.read();   // Prints the distance on the default unit (centimeters)
     Serial.print("jarak : ");
     Serial.println(jarak_objek);   
+    Serial.print("kapasitas : ");
+    Serial.println(kapasitas);   
+  }
+
+  // periode 1 detik proses sensor
+  if(current_time - prev_interval_2 >= interval_2){
+
+    prev_interval_2 = current_time;
+
+    //cek apakah ada orang akan buang sampah
+    if(jarak_objek < 5 && kapasitas > 3){
+      lcd.clear();
+      lcd.setCursor(0,0);
+      lcd.print("Tutup Terbuka");
+      lcd.setCursor(0,1);
+      lcd.print("Silahkan buang");
+    }
+    else if(jarak_objek < 5 && kapasitas <= 3){
+      lcd.clear();
+      lcd.setCursor(0,0);
+      lcd.print("Sampah Penuh");
+      lcd.setCursor(0,1);
+      lcd.print("tutup terkunci");
+    }
+  }
+
+  // periode 5 detik update LCD
+  if(current_time - prev_interval_3 >= interval_3){
+
+    prev_interval_3 = current_time;
+
+    lcd.clear();
+    lcd.setCursor(0,0);
+    lcd.print("Terpakai :");
+    lcd.setCursor(11,0);
+    lcd.print(kapasitas);
+
+    //status online (sementara pakai koneksi wifi, akan diganti dengan koneksi ke server)
+    if(fl_status_online == 1){
+      lcd.setCursor(9,1);
+      lcd.print("Online");
+    }
+    else{
+      lcd.setCursor(9,1);
+      lcd.print("Offline");
+    }
+
+    //update LED
+    if(kapasitas <= 3){
+      digitalWrite(RED_LED, HIGH);
+      digitalWrite(YEL_LED, LOW);
+      digitalWrite(GRN_LED, LOW);
+
+      lcd.setCursor(0,1);
+      lcd.print("Penuh");
+
+    }
+    else if(kapasitas > 3 && kapasitas < 15){
+      digitalWrite(RED_LED, LOW);
+      digitalWrite(YEL_LED, HIGH);
+      digitalWrite(GRN_LED, LOW);
+
+      lcd.setCursor(0,1);
+      lcd.print("Sedang");
+    }
+    else if(kapasitas >= 15){
+      digitalWrite(RED_LED, LOW);
+      digitalWrite(YEL_LED, LOW);
+      digitalWrite(GRN_LED, HIGH);
+
+      lcd.setCursor(0,1);
+      lcd.print("Longgar");
+    }
+
+
+
+
+    
+
   }
 
 
-  // Cek koneksi Wi-Fi
-  
-  // else{
-  
-
-  //   if(current_time - prev_interval_2 >= interval_2) {
-  //     prev_interval_2 = current_time; 
-  //     Serial.print("Jarak objeck: ");
-  //     Serial.print(jarak_objek); // Prints the distance making the unit explicit
-  //     Serial.println("cm");
-  //   }
-  // }
   
 
 }
@@ -118,24 +197,16 @@ void loop() {
 
 //koneksi pertama
 
-void wifi_connected(){
-  Serial.println();
-  Serial.println("Terhubung ke jaringan WiFi");
-  Serial.print("Alamat IP: ");
-  Serial.println(WiFi.localIP());
-}
+// void wifi_connected(){
+//   Serial.println();
+//   Serial.println("Terhubung ke jaringan WiFi");
+//   Serial.print("Alamat IP: ");
+//   Serial.println(WiFi.localIP());
+// }
 
-void connect_to_wifi() {
+void wifi_init() {
   Serial.println("Menghubungkan ke WiFi...");
-
   WiFi.begin(ssid, password);
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(1000);
-    Serial.print(".");
-  }
-
-  wifi_connected();
 }
 
 //koneksi ulang 
@@ -218,4 +289,23 @@ void gps_displayInfo()
   }
 
   Serial.println();
+}
+
+/* LCD */
+
+void lcd_setup(){
+  lcd.init();  
+  lcd.backlight();
+  lcd.setCursor(0,0);
+  lcd.print("Smart Bin");
+  lcd.setCursor(0,1);
+  lcd.print("Ivan Alfianto");
+}
+
+/* LED */
+
+void led_init(){
+  pinMode(RED_LED, OUTPUT);
+  pinMode(YEL_LED, OUTPUT);
+  pinMode(GRN_LED, OUTPUT);
 }
