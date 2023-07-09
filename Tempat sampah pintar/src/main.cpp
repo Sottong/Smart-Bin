@@ -4,10 +4,28 @@
 #include <TinyGPSPlus.h>
 #include <Ultrasonic.h>
 #include <LiquidCrystal_I2C.h>
+#include <Servo.h>
+
+
 
 #define RED_LED 5
 #define YEL_LED 18
 #define GRN_LED 19
+#define SERVO_PIN 13
+
+/* Blynk */
+#define BLYNK_TEMPLATE_ID "TMPL6LalkQnnG"
+#define BLYNK_TEMPLATE_NAME "Quickstart Template"
+
+
+#define BLYNK_FIRMWARE_VERSION        "0.1.0"
+#define BLYNK_PRINT Serial
+#define APP_DEBUG
+#define USE_ESP32_DEV_MODULE
+
+// ConfigStore data;
+
+#include "BlynkEdgent.h"
 
 
 /* GPS */
@@ -32,14 +50,16 @@ void gps_read();
 void gps_displayInfo();
 void lcd_setup();
 void led_init();
-
+void servo_open();
+void servo_close();
+void myTimerEvent();
 
 /* millis */
 
 unsigned long prev_interval_1 = 0;
 const unsigned long interval_1 = 1000;
 unsigned long prev_interval_2 = 0;
-const unsigned long interval_2 = 1000;
+unsigned long interval_2 = 10;
 unsigned long prev_interval_3 = 0;
 const unsigned long interval_3 = 5000;
 
@@ -51,18 +71,64 @@ Ultrasonic ultrasonic2(14, 12);	// An ultrasonic sensor HC-04
 
 int jarak_objek = 0;
 int kapasitas = 0;
+int kapasitas_persen = 0;
 
 /* LCD I2C */
 
 LiquidCrystal_I2C lcd(0x27,16,2);  // set the LCD address to 0x27 for a 16 chars and 2 line display
 
+/* Servo */
+
+Servo myservo;  // create servo object to control a servo
+int pos = 0;
+bool fl_servo_open = 0;
+
+/* tombol */
+
+bool fl_buka = 0;
+bool fl_tutup = 0;
+
+/* BLYNK*/
+
+BlynkTimer timer;
+ConfigStore data;
+// WidgetMap myMap(V2);
+#define UPLINK_INTERVAL 60000
+
+BLYNK_WRITE(V3)
+{
+  // Set incoming value from pin V0 to a variable
+  fl_buka  = param.asInt();
+  
+}
+
+BLYNK_WRITE(V4)
+{
+  // Set incoming value from pin V0 to a variable
+  fl_tutup  = param.asInt();
+ 
+}
 
 void setup() {
   Serial.begin(115200);
   Serial2.begin(GPSBaud); //GPS init
 
+  //blynk
+  BlynkEdgent.begin();
+  timer.setInterval(UPLINK_INTERVAL, myTimerEvent);
+
+  // int index = 0;
+  // double lat = 50.4495378;
+  // double lon = 30.5251447;
+  // double lat = latitude;
+  // double lon = longitudde;
+  
+  
+  // myMap.location(index, lat, lon, "Monument of Independence");
+  
+
   // Menghubungkan ke jaringan Wi-Fi
-  wifi_init();
+  // wifi_init();
 
   //read GPS
   gps_read();
@@ -73,9 +139,20 @@ void setup() {
   //LED init
   led_init();
 
+  //servo
+  myservo.attach(SERVO_PIN);
+  myservo.write(0);
+
+
 }
 
 void loop() {
+
+  BlynkEdgent.run();
+  if(fl_status_online) timer.run();
+
+
+
   // Kode program utama di sini
   unsigned long current_time = millis();
 
@@ -88,27 +165,35 @@ void loop() {
     if (WiFi.status() != WL_CONNECTED) {
       fl_status_online = 0;
       Serial.println("Koneksi Wi-Fi terputus. Menghubungkan ulang...");
-      reconnect_to_wifi(); // Menghubungkan ulang jika koneksi terputus
+      // WiFi.begin(configStore.wifiSSID, configStore.wifiPass);
+      // reconnect_to_wifi(); // Menghubungkan ulang jika koneksi terputus
     }
     else fl_status_online = 1;
     
 
     //cek data GPS
-    if(last_latitude != latitude ){
+    
       gps_read();
-      last_latitude = latitude;
       Serial.print("new latitude : ");
       Serial.println(latitude);
       Serial.print("last latitude : ");
-      Serial.println(last_latitude);
-    }
+
+    
     
     jarak_objek = ultrasonic1.read(); // Prints the distance on the default unit (centimeters)
-    kapasitas = ultrasonic2.read();   // Prints the distance on the default unit (centimeters)
+    if(!fl_servo_open)kapasitas = ultrasonic2.read();   // Prints the distance on the default unit (centimeters)
+    if(kapasitas >= 28) kapasitas = 27;
+
+    // kapasitas = 27;
+    kapasitas_persen = map(kapasitas, 0, 27, 100, 0);
+
     Serial.print("jarak : ");
     Serial.println(jarak_objek);   
     Serial.print("kapasitas : ");
     Serial.println(kapasitas);   
+    Serial.print("kapasitas persen : ");
+    Serial.print(kapasitas_persen);  
+    Serial.println("%");
   }
 
   // periode 1 detik proses sensor
@@ -117,19 +202,32 @@ void loop() {
     prev_interval_2 = current_time;
 
     //cek apakah ada orang akan buang sampah
-    if(jarak_objek < 5 && kapasitas > 3){
+    if(jarak_objek < 10 && kapasitas > 3){
       lcd.clear();
       lcd.setCursor(0,0);
       lcd.print("Tutup Terbuka");
       lcd.setCursor(0,1);
       lcd.print("Silahkan buang");
+      servo_open();
+      delay(5000);
+      //tutup servo
+      servo_close();
     }
-    else if(jarak_objek < 5 && kapasitas <= 3){
+    else if(jarak_objek < 8 && kapasitas <= 3){
       lcd.clear();
       lcd.setCursor(0,0);
       lcd.print("Sampah Penuh");
       lcd.setCursor(0,1);
       lcd.print("tutup terkunci");
+    }
+
+    if(fl_buka){
+      servo_open();
+      fl_buka = 0;
+    }
+    if(fl_tutup){
+      servo_close();
+      fl_tutup = 0;
     }
   }
 
@@ -142,7 +240,9 @@ void loop() {
     lcd.setCursor(0,0);
     lcd.print("Terpakai :");
     lcd.setCursor(11,0);
-    lcd.print(kapasitas);
+    lcd.print(kapasitas_persen);
+    lcd.setCursor(14,0);
+    lcd.print("%");
 
     //status online (sementara pakai koneksi wifi, akan diganti dengan koneksi ke server)
     if(fl_status_online == 1){
@@ -170,7 +270,7 @@ void loop() {
       digitalWrite(GRN_LED, LOW);
 
       lcd.setCursor(0,1);
-      lcd.print("Sedang");
+      lcd.print("Setengah");
     }
     else if(kapasitas >= 15){
       digitalWrite(RED_LED, LOW);
@@ -178,44 +278,14 @@ void loop() {
       digitalWrite(GRN_LED, HIGH);
 
       lcd.setCursor(0,1);
-      lcd.print("Longgar");
+      lcd.print("Kosong");
     }
 
-
-
-
-    
+ 
 
   }
-
-
   
-
 }
-
-/* Wifi */
-
-//koneksi pertama
-
-// void wifi_connected(){
-//   Serial.println();
-//   Serial.println("Terhubung ke jaringan WiFi");
-//   Serial.print("Alamat IP: ");
-//   Serial.println(WiFi.localIP());
-// }
-
-void wifi_init() {
-  Serial.println("Menghubungkan ke WiFi...");
-  WiFi.begin(ssid, password);
-}
-
-//koneksi ulang 
-void reconnect_to_wifi(){
-  WiFi.disconnect();
-  delay(100);
-  WiFi.begin();
-}
-
 
 /* GPS */
 
@@ -249,7 +319,7 @@ void gps_displayInfo()
     Serial.print(F(","));
     Serial.print(gps.location.lng(), 6);
   }
-  else
+  else 
   {
     Serial.print(F("INVALID"));
   }
@@ -308,4 +378,50 @@ void led_init(){
   pinMode(RED_LED, OUTPUT);
   pinMode(YEL_LED, OUTPUT);
   pinMode(GRN_LED, OUTPUT);
+}
+
+/* Servo */
+
+void servo_open(){
+
+  fl_servo_open = 1;
+  for(int posDegrees = 1; posDegrees <= 75; posDegrees += 10) {
+      myservo.write(posDegrees);
+      Serial.println(posDegrees);
+      delay(5);
+  
+  }
+
+}
+
+void servo_close(){
+  if(fl_servo_open == 1){
+    for(int posDegrees = 75; posDegrees >= 1; posDegrees -= 10) {
+    myservo.write(posDegrees);
+    Serial.println(posDegrees);
+    delay(5);
+    }
+    fl_servo_open = 0;
+  }
+}
+
+void myTimerEvent() // This loop defines what happens when timer is triggered
+{
+  // Serial.println("tes timer untuk uplink");
+
+  //data yang dikirim 
+  //kapasitas V0
+  Blynk.virtualWrite(V0, kapasitas_persen);
+  //status online device V1
+  Blynk.virtualWrite(V1, fl_status_online);
+  //GPS
+
+  // double lat = 50.4495378;
+  // double lon = 30.5251447;
+  double lat = latitude;
+  double lon = longitudde;
+  Blynk.virtualWrite(V2, lon, lat);
+  if(kapasitas_persen > 90){
+    Blynk.logEvent("PENUH");
+  }
 }
