@@ -14,8 +14,8 @@
 #define SERVO_PIN 13
 
 /* Blynk */
-#define BLYNK_TEMPLATE_ID "TMPL6LalkQnnG"
-#define BLYNK_TEMPLATE_NAME "Quickstart Template"
+#define BLYNK_TEMPLATE_ID "TMPL6o7IBuD2I"
+#define BLYNK_TEMPLATE_NAME "Tempat Sampah Pintar"
 
 
 #define BLYNK_FIRMWARE_VERSION        "0.1.0"
@@ -219,6 +219,7 @@ void loop() {
       lcd.print("Sampah Penuh");
       lcd.setCursor(0,1);
       lcd.print("tutup terkunci");
+      delay(5000);
     }
 
     if(fl_buka){
@@ -384,8 +385,8 @@ void led_init(){
 
 void servo_open(){
 
-  fl_servo_open = 1;
-  for(int posDegrees = 1; posDegrees <= 75; posDegrees += 10) {
+  fl_servo_open = 0;
+  for(int posDegrees = 0; posDegrees <= 70; posDegrees += 10) {
       myservo.write(posDegrees);
       Serial.println(posDegrees);
       delay(5);
@@ -395,8 +396,8 @@ void servo_open(){
 }
 
 void servo_close(){
-  if(fl_servo_open == 1){
-    for(int posDegrees = 75; posDegrees >= 1; posDegrees -= 10) {
+  if(fl_servo_open == 0){
+    for(int posDegrees = 70; posDegrees >= 0; posDegrees -= 10) {
     myservo.write(posDegrees);
     Serial.println(posDegrees);
     delay(5);
